@@ -808,45 +808,35 @@ form.addEventListener('submit', async ev => {
   };
 
   try {
-    // 最多等 25 秒，避免卡在「送出中」不動
+    // no-cors 模式：相容 LINE、IG 等 App 內建瀏覽器
+    // 代價是收不到後端回應，所以只要送出成功就顯示完成頁
+    // 資料照樣進試算表、確認信照樣寄（那些由後端處理，不受影響）
     const ctrl  = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 25000);
 
-    let res;
     try {
-      res = await fetch(ENDPOINT, {
+      await fetch(ENDPOINT, {
         method : 'POST',
+        mode   : 'no-cors',
         headers: {'Content-Type':'text/plain;charset=utf-8'},
         body   : JSON.stringify(payload),
         signal : ctrl.signal
       });
     } catch (netErr) {
       throw new Error(netErr.name === 'AbortError'
-        ? '等待後端回應超過 25 秒。資料可能已寫入，請先私訊官方 LINE 小幫手確認，不要重複送出'
+        ? '網路較慢，資料可能已送出，請先私訊官方 LINE 小幫手確認，不要重複送出'
         : '連線失敗，請確認網路後再試一次');
     } finally {
       clearTimeout(timer);
     }
 
-    const raw = await res.text();
-    console.log('[報名表單] 狀態碼', res.status, '回應', raw.slice(0, 300));
+    // no-cors 收不到回應，送出即視為成功
+    const venueLine = (kind === 'online')
+      ? ses.dataset.label + ' 當天以線上 LIVE 進行<br>直播連結會在課前發送'
+      : ses.dataset.label + ' 09:30 開放報到<br>' + ses.dataset.venue
+        + '<br>' + ses.dataset.addr + '<br>' + ses.dataset.near;
+    showDone(way, amount, kind, venueLine);
 
-    let data;
-    try { data = JSON.parse(raw); }
-    catch { throw new Error('後端沒有回傳 JSON，請確認部署存取權設為「所有人」，且網址結尾是 /exec'); }
-
-    if (data.ok){
-      const venueLine = (kind === 'online')
-        ? ses.dataset.label + ' 當天以線上 LIVE 進行<br>直播連結會在課前發送'
-        : ses.dataset.label + ' 09:30 開放報到<br>' + ses.dataset.venue
-          + '<br>' + ses.dataset.addr + '<br>' + ses.dataset.near;
-      showDone(way, amount, kind, venueLine);
-    } else if (data.error === 'duplicate'){
-      showBanner('這支手機號碼已經報名過這一場了，不用再送一次。若還沒完成繳費，請私訊官方 LINE 小幫手取得連結');
-      btn.disabled = false; btn.textContent = '送出報名';
-    } else {
-      throw new Error(data.error || 'unknown');
-    }
   } catch (err) {
     console.error('[報名表單] 送出失敗', err);
     showBanner('送出失敗：' + (err.message || err) + '｜若持續發生請私訊官方 LINE 小幫手');
