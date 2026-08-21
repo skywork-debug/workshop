@@ -635,7 +635,11 @@ input:focus,textarea:focus{
       <div class="notes">
         <div class="note-row">
           <svg width="5" height="5" viewBox="0 0 5 5"><circle cx="2.5" cy="2.5" r="2.5" fill="#A87C3C"/></svg>
-          <div>繳費連結也會一併寄到你填寫的信箱<br>不小心關掉這頁也不用擔心</div>
+          <div><b style="color:#6E4E22">請至信箱收「報名確認信」</b><br>收到才代表報名成功，繳費連結也在信裡</div>
+        </div>
+        <div class="note-row">
+          <svg width="5" height="5" viewBox="0 0 5 5"><circle cx="2.5" cy="2.5" r="2.5" fill="#A87C3C"/></svg>
+          <div>幾分鐘內沒收到<br>請檢查垃圾郵件匣，或私訊官方 LINE 小幫手</div>
         </div>
         <div class="note-row">
           <svg width="5" height="5" viewBox="0 0 5 5"><circle cx="2.5" cy="2.5" r="2.5" fill="#A87C3C"/></svg>
@@ -807,43 +811,66 @@ form.addEventListener('submit', async ev => {
     ua      : navigator.userAgent
   };
 
-  try {
-    // no-cors 模式：相容 LINE、IG 等 App 內建瀏覽器
-    // 代價是收不到後端回應，所以只要送出成功就顯示完成頁
-    // 資料照樣進試算表、確認信照樣寄（那些由後端處理，不受影響）
-    const ctrl  = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 25000);
-
-    try {
-      await fetch(ENDPOINT, {
-        method : 'POST',
-        mode   : 'no-cors',
-        headers: {'Content-Type':'text/plain;charset=utf-8'},
-        body   : JSON.stringify(payload),
-        signal : ctrl.signal
-      });
-    } catch (netErr) {
-      throw new Error(netErr.name === 'AbortError'
-        ? '網路較慢，資料可能已送出，請先私訊官方 LINE 小幫手確認，不要重複送出'
-        : '連線失敗，請確認網路後再試一次');
-    } finally {
-      clearTimeout(timer);
-    }
-
-    // no-cors 收不到回應，送出即視為成功
+  // form + 隱藏 iframe 送出：
+  // 比 no-cors fetch 更可靠，且相容 LINE / IG 內建瀏覽器與國外不穩的網路
+  // 送出後仍收不到後端回應（跨網域限制），所以完成頁改以「信箱確認信」為準
+  submitViaIframe(payload, () => {
     const venueLine = (kind === 'online')
       ? ses.dataset.label + ' 當天以線上 LIVE 進行<br>直播連結會在課前發送'
       : ses.dataset.label + ' 09:30 開放報到<br>' + ses.dataset.venue
         + '<br>' + ses.dataset.addr + '<br>' + ses.dataset.near;
     showDone(way, amount, kind, venueLine);
+  }, () => {
+    showBanner('送出失敗，請確認網路後再試一次｜若持續發生請私訊官方 LINE 小幫手');
+    btn.disabled = false;
+    btn.textContent = '送出報名';
+  });
+});
+
+/**
+ * 用隱藏 iframe + form 送出資料
+ * 這是相容性最高的跨網域送法，LINE/IG 內建瀏覽器與國外網路都吃得下
+ * onDone：送出動作完成（不代表後端一定成功，成功以確認信為準）
+ * onFail：連 form 都建不起來（極少見）
+ */
+function submitViaIframe(payload, onDone, onFail){
+  try {
+    const iframeName = 'submit_' + Date.now();
+    const iframe = document.createElement('iframe');
+    iframe.name  = iframeName;
+    iframe.style.display = 'none';
+    document.body.appendChild(iframe);
+
+    const form = document.createElement('form');
+    form.action = ENDPOINT;
+    form.method = 'POST';
+    form.target = iframeName;
+    form.style.display = 'none';
+
+    // Apps Script 的 e.parameter 會收到這個欄位，後端用 JSON.parse 解析
+    const input = document.createElement('input');
+    input.type  = 'hidden';
+    input.name  = 'payload';
+    input.value = JSON.stringify(payload);
+    form.appendChild(input);
+
+    document.body.appendChild(form);
+    form.submit();
+
+    // 送出後給後端一點時間，再顯示完成頁並清理 DOM
+    setTimeout(() => {
+      onDone();
+      setTimeout(() => {
+        try { document.body.removeChild(form); } catch(e){}
+        try { document.body.removeChild(iframe); } catch(e){}
+      }, 3000);
+    }, 1200);
 
   } catch (err) {
     console.error('[報名表單] 送出失敗', err);
-    showBanner('送出失敗：' + (err.message || err) + '｜若持續發生請私訊官方 LINE 小幫手');
-    btn.disabled = false;
-    btn.textContent = '送出報名';
+    if (onFail) onFail();
   }
-});
+}
 
 /* 預覽模式
    ?preview=done            → 台中場 實體
